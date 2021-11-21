@@ -2,6 +2,7 @@ use rand::Rng;
 use rand_distr::Distribution;
 use std::cmp::max;
 
+#[defive(Copy, Clone, Debug)]
 pub struct Customer {
     interarrival_time: f64,
     time_of_arrival: f64,

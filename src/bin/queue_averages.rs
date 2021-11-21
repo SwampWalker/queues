@@ -1,7 +1,8 @@
+use rand::prelude::*;
 use rand_distr::Exp;
 
-use rand::prelude::*;
 use queues::customer::Customer;
+use queues::formats;
 
 fn main() {
     let minute = 60.;
@@ -40,25 +41,10 @@ fn main() {
 
         if n_samples % output_frequency == 0 {
             println!("<W_q> = {} ± {}, <W> = {} ± {} (n = {})",
-                     human_readable(average_wq), human_readable(deviation_wq),
-                     human_readable(average_w), human_readable(deviation_w),
+                     formats::human_readable(average_wq), formats::human_readable(deviation_wq),
+                     formats::human_readable(average_w), formats::human_readable(deviation_w),
                      n_samples,
             );
         }
-    }
-}
-
-fn human_readable(seconds: f64) -> String {
-    return if seconds < 2. * 60. {
-        // Less than two minutes, use seconds.
-        format!("{:.2} sec", seconds)
-    } else if seconds < 2. * 60. * 60. {
-        // Less than two hours, use minutes.
-        format!("{:.2} min", seconds / 60.)
-    } else if seconds < 2. * 60. * 60. * 24. {
-        format!("{:.2} hr", seconds / (60. * 60.))
-    } else {
-        // Use days.
-        format!("{:.2} hr", seconds / (60. * 60. * 24.))
     }
 }
