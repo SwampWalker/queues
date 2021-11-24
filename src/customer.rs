@@ -2,7 +2,7 @@ use rand::Rng;
 use rand_distr::Distribution;
 use std::cmp::max;
 
-#[defive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Customer {
     interarrival_time: f64,
     time_of_arrival: f64,
@@ -92,8 +92,16 @@ impl Customer {
         self.time_of_arrival
     }
 
+    pub fn arrival_time(&self) -> f64 {
+        self.time_of_arrival
+    }
+
     /// Returns `D_n` the departure time of this customer.
     pub fn d(&self) -> f64 {
+        self.time_of_departure
+    }
+
+    pub fn departure_time(&self) -> f64 {
         self.time_of_departure
     }
 
