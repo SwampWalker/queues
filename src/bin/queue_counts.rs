@@ -6,6 +6,9 @@ use structopt::StructOpt;
 use queues::queues::{Queue, QueueEvent};
 use std::fs::File;
 
+const MINUTE: f64 = 60.;
+const HOUR: f64 = 60. * MINUTE;
+
 #[derive(StructOpt)]
 struct Cli {
     /// The number of samples to generate.
@@ -14,41 +17,52 @@ struct Cli {
     /// The path to the file to output to.
     #[structopt(short, long, parse(from_os_str))]
     path: Option<std::path::PathBuf>,
+    /// The interarrival rate of customers: lambda
+    #[structopt(short, long, default_value = "5.8")]
+    customers_per_hour: f64,
+    /// The average time it takes to provide service to a customer: mu
+    #[structopt(short =  "mu", long, default_value = "10.")]
+    customer_service_time_in_minutes: f64,
+}
+
+impl Cli {
+    pub fn lambda(&self) -> f64 {
+        self.customers_per_hour / HOUR
+    }
+
+    pub fn mu(&self) -> f64 {
+        1. / (self.customer_service_time_in_minutes * MINUTE)
+    }
+
 }
 
 fn main() -> Result<(), Error> {
     let terminate = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&terminate))?;
 
-    let args: Cli = Cli::from_args();
+    let cli: Cli = Cli::from_args();
 
-    let minute = 60.;
-    let hour = 60. * minute;
-    let customer_arrival_lambda = 5.8 / hour;
+    let mut queue = Queue::new_exp_exp(cli.lambda(), cli.mu());
 
-    let mean_time_to_serve_customer = 10. * minute;
-    let customer_service_lambda = 1. / mean_time_to_serve_customer;
-
-    let mut queue = Queue::new_exp_exp(customer_arrival_lambda, customer_service_lambda);
-
-    if let Some(path) = args.path {
+    if let Some(path) = &cli.path {
         let mut file = File::create(path).unwrap();
-        simulate(&mut file, terminate, args.samples, queue);
+        simulate(&mut file, terminate, cli, queue);
     } else {
         let stdout = stdout();
         let mut stdout = stdout.lock();
-        simulate(&mut stdout, terminate, args.samples, queue);
+        simulate(&mut stdout, terminate, cli, queue);
     }
 
     Ok(())
 }
 
-fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, n_samples: usize, mut queue: Queue) {
+fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, cli: Cli, mut queue: Queue) {
     let mut samples = 0;
     let mut a: u64 = 0;
     let mut d: u64 = 0;
+    writeln!(out, "# {{\"lambda\":{}, \"mu\":{}}}", cli.lambda(), cli.mu());
     writeln!(out, "# time(s) arrivals departures in_system");
-    while !terminate.load(Ordering::Relaxed) && samples < n_samples {
+    while !terminate.load(Ordering::Relaxed) && samples < cli.samples {
         samples += 1;
 
         let event = queue.next_event();
