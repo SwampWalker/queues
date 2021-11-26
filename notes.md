@@ -74,3 +74,43 @@ This is easy to compare.
 
 Should probably parameterize that python script a bit... The analysis seems kind of noisy. I'm not sure
 what the error bars are supposed to be.
+
+#### I made a mistake, didn't I?
+
+The comparison with the theoretical proportions seems like more than just noise, it seems like something
+is wrong:
+
+    n p_n      E(p_n) 
+    0 0.017758 0.03333333333333344
+    1 0.034762 0.03222222222222232
+    2 0.033267 0.031148148148148237
+    3 0.03196 0.03010987654320996
+    4 0.031063 0.029106213991769627
+
+It is hard to imagine being off by a factor of 2. Of course, we start in state 1. To get to 0,
+we always have to pass through 1 and the next transition from 0 will always be to 1. If we do
+not stop the simulation in state 0, then the number of times 1 was seen will always be greater
+than 0. Perhaps my interpretation of p_n is wrong?
+
+> Let p_n denote the long-term fraction of time the system is in state n.
+
+Yeah, that sounds like the wrong interpretation. Need to sum time in state and divide by total time.
+I was calculating the proportion of state transitions to i. I'm curious what that would be, but it is
+not p_n.
+
+I'm still not convinced; I lean towards having another bug... here is a sample of 10_000_000 customers:
+
+    0 0.03420710410659557 0.03333333333333344
+    1 0.033221973151713706 0.03222222222222232
+    2 0.03223561829434469 0.031148148148148237
+    3 0.03110375159206097 0.03010987654320996
+    4 0.030187963269682684 0.029106213991769627
+
+Shouldn't there be more precision? Hmm, let's check out the sample average lambda and mu and compare those with the
+provided.
+
+    C:\projects\star_analysis\queues\Scripts\python.exe C:/projects/queues/scripts/src/queues_analysis/sample_rates.py
+    lambda, actual = 0.0016111111111111111, sampled = 0.0016127451977311228
+    mu, actual = 0.0016666666666666668, sampled = 0.0016668901793021147
+
+Looks pretty good.
