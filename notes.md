@@ -57,3 +57,20 @@ is incremented. If it is equal, then `D(t)` is incremented. If it is greater, th
 emitted incrementing `D(t)` and the process starts over.
 
 In this way, a queue of departure times is kept in memory equal to `N(t_n)`.
+
+### The proportion of time spent with n people in the queue: p_n
+
+This is a nice little result presented in section 3.2. It follows largely from modelling the queue
+as a markov chain and deriving the state change probabilities at steady state using a sort of flow
+notion. The rate of incoming customers is given by lambda, the rate of departing customers is given
+by mu, this leads to a single parameter rho = lambda / mu and a handy formula for p_n:
+
+    p_n = (1 - rho) * rho^n
+
+This is easy to compare.
+
+    .\target\debug\queue_counts.exe --path target/counts.txt
+    python .\scripts\src\queues_analysis\proportions.py
+
+Should probably parameterize that python script a bit... The analysis seems kind of noisy. I'm not sure
+what the error bars are supposed to be.
