@@ -4,7 +4,7 @@ use std::io::{BufReader, BufRead, Error};
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::SplitAsciiWhitespace;
-use queues::queues::{QueueEvent, CountAnalyser, QueueError};
+use queues::queues::{QueueEvent, EventAnalyser, QueueError};
 use thiserror::Error;
 
 #[derive(StructOpt)]
@@ -29,8 +29,8 @@ fn main() -> Result<(), ApplicationError>{
     let file = File::open(cli.path)?;
     let mut reader = BufReader::new(file);
 
-    let mut analyser = CountAnalyser::new(&mut reader)?;
-    for (i, line) in reader.lines().enumerate() {
+    let mut analyser = EventAnalyser::new(&mut reader)?;
+    for line in reader.lines() {
         let line = line?;
         let counts = QueueEvent::try_from(line.clone()).map_err(|e| ApplicationError::LineFormatError(e, line))?;
         analyser.add_count(counts);

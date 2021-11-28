@@ -56,6 +56,15 @@ impl ArrivingCustomer {
         }
     }
 
+    /// The customer that never arrives, but if they do, they will never finish being served.
+    pub fn never() -> ArrivingCustomer {
+        ArrivingCustomer {
+            interarrival_time: f64::INFINITY,
+            time_of_arrival: f64::INFINITY,
+            service_time: f64::INFINITY,
+        }
+    }
+
     /// Returns `A_n` the arrival time of this customer.
     pub fn a(&self) -> f64 {
         self.time_of_arrival

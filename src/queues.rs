@@ -112,6 +112,17 @@ impl Queue {
 
         return (index, next_departure_time);
     }
+
+    pub fn empty(&mut self) -> Vec<QueueEvent> {
+        self.next_customer = ArrivingCustomer::never();
+        let mut emptied = Vec::new();
+
+        while !self.queue.is_empty() {
+             emptied.push(self.next_event().clone());
+        }
+
+        emptied
+    }
 }
 
 #[derive(Debug, Error)]
@@ -159,7 +170,7 @@ pub struct Parameters {
 }
 
 #[derive(Default)]
-pub struct CountAnalyser {
+pub struct EventAnalyser {
     lambda: f64,
     mu: f64,
 
@@ -170,22 +181,24 @@ pub struct CountAnalyser {
     n_arrivals: u64,
     arrival_time_sum: f64,
 
+    queue_wait_sum: f64,
+    system_wait_sum: f64,
+    arrival_epsilon: f64,
+
     last_n: u64,
     time_in_n: HashMap<u64, f64>,
     time_of_last_event: f64,
 }
 
-impl CountAnalyser {
-    pub fn new<R: Read>(reader: &mut BufReader<R>) -> Result<CountAnalyser, QueueError> {
+impl EventAnalyser {
+    pub fn new<R: Read>(reader: &mut BufReader<R>) -> Result<EventAnalyser, QueueError> {
         let mut line_0 = String::new();
         let _ = reader.read_line(&mut line_0).map_err(|e| QueueError::LineReading(e))?;
-
-        // Sanity check header line.
-        let mut line_1 = String::new();
-        let _ = reader.read_line(&mut line_1).map_err(|e| QueueError::LineReading(e))?;
-
         let params: Parameters = serde_json::from_str(&line_0[1..]).map_err(|e| QueueError::ParameterReading(e))?;
 
+        // Sanity check header line. TODO: Surely there is a better way to column serialize...
+        let mut line_1 = String::new();
+        let _ = reader.read_line(&mut line_1).map_err(|e| QueueError::LineReading(e))?;
         let expected = format!("# {} {} {} {} {} {} {} {} {} {} {} {}\n",
                                COLUMNS[I_TIME], COLUMNS[I_ARRIVALS], COLUMNS[I_DEPARTURES], COLUMNS[I_IN_SYSTEM],
                                COLUMNS[I_TYPE],
@@ -195,7 +208,7 @@ impl CountAnalyser {
         );
         assert_eq!(expected, line_1);
 
-        let mut analyser = CountAnalyser::default();
+        let mut analyser = EventAnalyser::default();
         analyser.lambda = params.lambda;
         analyser.mu = params.mu;
 
@@ -216,6 +229,11 @@ impl CountAnalyser {
             self.n_served += 1;
             self.service_time_sum += service_time;
             self.last_service_start = count.time;
+
+            let customer = count.served_customer.as_ref()
+                .expect("If the in_system count has decreased and the line event didn't contain a served_customer, the event was constructed improperly.");
+            self.system_wait_sum += customer.wait_in_system;
+            self.queue_wait_sum += customer.wait_in_queue;
         } else {
             // Arrival.
             let interarrival_time = count.time - self.last_arrival;
@@ -246,6 +264,8 @@ impl CountAnalyser {
             sample_lambda,
             mu: self.mu,
             sample_mu,
+            sample_w_q: self.queue_wait_sum / self.n_served as f64,
+            sample_w: self.system_wait_sum / self.n_served as f64,
             proportions,
         }
     }
@@ -367,6 +387,8 @@ pub struct CountAnalysis {
     sample_lambda: f64,
     mu: f64,
     sample_mu: f64,
+    sample_w_q: f64,
+    sample_w: f64,
     proportions: HashMap<u64, f64>,
 }
 
@@ -385,11 +407,31 @@ impl CountAnalysis {
         println!("lambda: sample = {}, input = {}", self.sample_lambda, self.lambda);
         println!("mu: sample = {}, input = {}", self.sample_mu, self.mu);
 
+        // Steady state count of people in queue/system
         let mut steady_customers_count = 0.;
         for n in 0u64..self.proportions.len() as u64 {
             steady_customers_count += n as f64 * self.proportions.get(&n).unwrap();
         }
         let ell = self.lambda / (self.mu - self.lambda);
-        println!("Average number in Queue, L: sample = {}, expected = {}", steady_customers_count, ell);
+        println!("Average number in system, L: sample = {}, expected = {}", steady_customers_count, ell);
+
+        let mut steady_queue_count = 0.;
+        for n in 1u64..self.proportions.len() as u64 {
+            steady_queue_count += (n - 1) as f64 * self.proportions.get(&n).unwrap();
+        }
+        let ell_q = self.lambda * self.lambda / (self.mu * (self.mu - self.lambda));
+        println!("Average number in queue, L_q: sample = {}, expected = {}", steady_queue_count, ell_q);
+
+        // Average waits.
+        let rho = self.lambda / self.mu;
+        let expected_w_q = rho / (self.mu - self.lambda);
+        println!("Average wait in Queue, W_q: sample = {}, expected = {}", self.sample_w_q, expected_w_q);
+        let expected_w = 1. / (self.mu - self.lambda);
+        println!("Average wait in system, W: sample = {}, expected = {}", self.sample_w, expected_w);
+
+        println!();
+        println!("Little's Law:");
+        println!("L = W * lambda = {}, expected = {}", self.sample_w * self.sample_lambda, ell);
+        println!("L_q = W_q * lambda = {}, expected = {}", self.sample_w_q * self.sample_lambda, ell_q);
     }
 }

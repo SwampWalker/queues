@@ -23,6 +23,8 @@ struct Cli {
     /// The average time it takes to provide service to a customer: mu
     #[structopt(short =  "mu", long, default_value = "10.")]
     customer_service_time_in_minutes: f64,
+    #[structopt(short, long)]
+    empty: bool,
 }
 
 impl Cli {
@@ -65,6 +67,12 @@ fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, cli: Cli, mut
 
         let event = queue.next_event();
         event.dump_line(out);
+    }
+    if cli.empty {
+        let emptied = queue.empty();
+        for event in emptied {
+            event.dump_line(out);
+        }
     }
 
     Ok(())
