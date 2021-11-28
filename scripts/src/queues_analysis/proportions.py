@@ -16,7 +16,7 @@ def main() -> int:
         params.update(json.loads(lines.readline()[1:]))
         line = lines.readline().strip()
         expected_columns = "# time(s) arrivals departures in_system"
-        assert line == expected_columns, "File failed sanity check. Did the columns change?\nExpected: " +expected_columns +"\nReceived: " + line
+        assert line == expected_columns, "File failed sanity check. Did the columns change?\nExpected: " + expected_columns + "\nReceived: " + line
         last_n = 0
         for line in lines:
             tokens = line.split()
@@ -32,9 +32,19 @@ def main() -> int:
             last_n = n
 
     rho = params["lambda"] / params["mu"]
-    for i in range(0, len(time_in_n)):
-        expected = (1. - rho) * rho ** i
-        print("{} {} {}".format(i, time_in_n[i] * 1. / time, expected))
+    steady_number_of_customers = 0
+    for n in range(0, len(time_in_n)):
+        expected_p_n = (1. - rho) * rho ** n
+        measured_p_n = time_in_n[n] * 1. / time
+        print("{} {} {}".format(n, measured_p_n, expected_p_n))
+        steady_number_of_customers += n * measured_p_n
+
+    # For M/M/1 this comes from 3.2.4
+    theoretical = params["lambda"] / (params["mu"] - params["lambda"])
+
+    print("")
+    print("Number of customers in system at steady state: measured = {}, theoretical = {}".format(steady_number_of_customers, theoretical))
+
     return 0
 
 

@@ -42,26 +42,26 @@ fn main() -> Result<(), Error> {
 
     let cli: Cli = Cli::from_args();
 
-    let mut queue = Queue::new_exp_exp(cli.lambda(), cli.mu());
+    let queue = Queue::new_exp_exp(cli.lambda(), cli.mu());
 
     if let Some(path) = &cli.path {
         let mut file = File::create(path).unwrap();
-        simulate(&mut file, terminate, cli, queue);
+        simulate(&mut file, terminate, cli, queue)?;
     } else {
         let stdout = stdout();
         let mut stdout = stdout.lock();
-        simulate(&mut stdout, terminate, cli, queue);
+        simulate(&mut stdout, terminate, cli, queue)?;
     }
 
     Ok(())
 }
 
-fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, cli: Cli, mut queue: Queue) {
+fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, cli: Cli, mut queue: Queue) -> Result<(), Error>{
     let mut samples = 0;
     let mut a: u64 = 0;
     let mut d: u64 = 0;
-    writeln!(out, "# {{\"lambda\":{}, \"mu\":{}}}", cli.lambda(), cli.mu());
-    writeln!(out, "# time(s) arrivals departures in_system");
+    writeln!(out, "# {{\"lambda\":{}, \"mu\":{}}}", cli.lambda(), cli.mu())?;
+    writeln!(out, "# time(s) arrivals departures in_system")?;
     while !terminate.load(Ordering::Relaxed) && samples < cli.samples {
         samples += 1;
 
@@ -77,6 +77,8 @@ fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, cli: Cli, mut
             }
         };
 
-        writeln!(out, "{} {} {} {}", time, a, d, a - d);
+        writeln!(out, "{} {} {} {}", time, a, d, a - d)?;
     }
+
+    Ok(())
 }

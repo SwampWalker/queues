@@ -1,4 +1,3 @@
-use rand::prelude::*;
 use rand_distr::Exp;
 
 use queues::customer::Customer;

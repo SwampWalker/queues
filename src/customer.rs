@@ -1,6 +1,5 @@
 use rand::Rng;
 use rand_distr::Distribution;
-use std::cmp::max;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Customer {
