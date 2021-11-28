@@ -12,7 +12,7 @@ const HOUR: f64 = 60. * MINUTE;
 #[derive(StructOpt)]
 struct Cli {
     /// The number of samples to generate.
-    #[structopt(short, long, default_value = "1000000")]
+    #[structopt(short, long, default_value = "10000000")]
     samples: usize,
     /// The path to the file to output to.
     #[structopt(short, long, parse(from_os_str))]
@@ -58,26 +58,13 @@ fn main() -> Result<(), Error> {
 
 fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, cli: Cli, mut queue: Queue) -> Result<(), Error>{
     let mut samples = 0;
-    let mut a: u64 = 0;
-    let mut d: u64 = 0;
     writeln!(out, "# {{\"lambda\":{}, \"mu\":{}}}", cli.lambda(), cli.mu())?;
-    writeln!(out, "# time(s) arrivals departures in_system")?;
+    QueueEvent::dump_line_header(out);
     while !terminate.load(Ordering::Relaxed) && samples < cli.samples {
         samples += 1;
 
         let event = queue.next_event();
-        let time = match event {
-            QueueEvent::Arrival(t, _) => {
-                a += 1;
-                t
-            }
-            QueueEvent::Departure(t, _) => {
-                d += 1;
-                t
-            }
-        };
-
-        writeln!(out, "{} {} {} {}", time, a, d, a - d)?;
+        event.dump_line(out);
     }
 
     Ok(())

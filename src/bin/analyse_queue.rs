@@ -4,7 +4,7 @@ use std::io::{BufReader, BufRead, Error};
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::SplitAsciiWhitespace;
-use queues::queues::{Count, CountAnalyser, QueueError};
+use queues::queues::{QueueEvent, CountAnalyser, QueueError};
 use thiserror::Error;
 
 #[derive(StructOpt)]
@@ -32,7 +32,7 @@ fn main() -> Result<(), ApplicationError>{
     let mut analyser = CountAnalyser::new(&mut reader)?;
     for (i, line) in reader.lines().enumerate() {
         let line = line?;
-        let counts = Count::try_from(line.clone()).map_err(|e| ApplicationError::LineFormatError(e, line))?;
+        let counts = QueueEvent::try_from(line.clone()).map_err(|e| ApplicationError::LineFormatError(e, line))?;
         analyser.add_count(counts);
     }
 

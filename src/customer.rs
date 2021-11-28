@@ -1,20 +1,15 @@
 use rand::Rng;
 use rand_distr::Distribution;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
-pub struct Customer {
+pub struct ArrivingCustomer {
     interarrival_time: f64,
     time_of_arrival: f64,
     service_time: f64,
-
-    time_of_service_start: f64,
-    time_of_departure: f64,
-
-    wait_in_queue: f64,
-    wait_in_system: f64,
 }
 
-impl Customer {
+impl ArrivingCustomer {
     /// Generate the first customer in a simulation. This is not really dependent on anything
     /// but the service distribution since an empty queue means they will be served right away.
     ///
@@ -24,27 +19,15 @@ impl Customer {
     pub fn first<R: Rng + ?Sized, DS: Distribution<f64>>(
         rng: &mut R,
         service_time_distribution: &DS,
-    ) -> Customer {
+    ) -> ArrivingCustomer {
         let t_0 = 0.;
         let a_0 = 0.;
         let s_0 = service_time_distribution.sample(rng);
 
-        let u_0 = 0.;
-        let d_0 = u_0 + s_0;
-
-        let wq_0 = u_0 - a_0;
-        let w_0 = wq_0 + s_0;
-
-        Customer {
+        ArrivingCustomer {
             interarrival_time: t_0,
             time_of_arrival: a_0,
             service_time: s_0,
-
-            time_of_service_start: u_0,
-            time_of_departure: d_0,
-
-            wait_in_queue: wq_0,
-            wait_in_system: w_0,
         }
     }
 
@@ -60,29 +43,16 @@ impl Customer {
         rng: &mut R,
         interarrival_time_distribution: &DA,
         service_time_distribution: &DS,
-        previous: Customer,
-    ) -> Customer {
+        previous: ArrivingCustomer,
+    ) -> ArrivingCustomer {
         let t_n = interarrival_time_distribution.sample(rng);
         let a_n = previous.a() + t_n;
         let s_n = service_time_distribution.sample(rng);
 
-        // XXX u is a function of the queue discipline, servers, etc.
-        let u_n = f64::max(a_n, previous.d());
-        let d_n = u_n + s_n;
-
-        let wq_n = u_n - a_n;
-        let w_n = wq_n + s_n;
-
-        Customer {
+        ArrivingCustomer {
             interarrival_time: t_n,
             time_of_arrival: a_n,
             service_time: s_n,
-
-            time_of_service_start: u_n,
-            time_of_departure: d_n,
-
-            wait_in_queue: wq_n,
-            wait_in_system: w_n,
         }
     }
 
@@ -94,23 +64,31 @@ impl Customer {
     pub fn arrival_time(&self) -> f64 {
         self.time_of_arrival
     }
+}
 
-    /// Returns `D_n` the departure time of this customer.
-    pub fn d(&self) -> f64 {
-        self.time_of_departure
-    }
+#[derive(Copy, Clone)]
+pub struct Customer {
+    pub(crate) interarrival_time: f64,
+    pub(crate) time_of_arrival: f64,
+    pub(crate) service_time: f64,
 
-    pub fn departure_time(&self) -> f64 {
-        self.time_of_departure
-    }
+    pub(crate) time_of_service_start: f64,
+    pub(crate) time_of_departure: f64,
 
-    /// Returns `W_q_n` the waiting time in the queue of this customer.
-    pub fn wq(&self) -> f64 {
-        self.wait_in_queue
-    }
+    pub(crate) wait_in_queue: f64,
+    pub(crate) wait_in_system: f64,
+}
 
-    /// Returns `W_n` the waiting time in the system of this customer.
-    pub fn w(&self) -> f64 {
-        self.wait_in_system
+impl Customer {
+    pub fn start_service(arriving_customer: ArrivingCustomer, time_of_service_start: f64) -> Customer {
+        Customer {
+            interarrival_time: arriving_customer.interarrival_time,
+            time_of_arrival: arriving_customer.time_of_arrival,
+            service_time: arriving_customer.service_time,
+            time_of_service_start,
+            time_of_departure: time_of_service_start + arriving_customer.service_time,
+            wait_in_queue: time_of_service_start - arriving_customer.time_of_arrival,
+            wait_in_system: time_of_service_start - arriving_customer.time_of_arrival + arriving_customer.service_time,
+        }
     }
 }

@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
-use std::io::{BufRead, BufReader, Read};
-use std::panic::panic_any;
-use std::str::SplitAsciiWhitespace;
+use std::io::{BufRead, BufReader, Read, Write};
 
 use rand::prelude::ThreadRng;
 use rand_distr::Exp;
@@ -11,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::customer::Customer;
-use crate::queues::QueueEvent::{Arrival, Departure};
+use crate::customer::{ArrivingCustomer, Customer};
 
 // TODO: if I continue down this road, that Exp type will need to be parameterized, probably ThreadRng as well.
 /// So, here's the plan:
@@ -35,22 +32,18 @@ pub struct Queue {
     customer_service_distribution: Exp<f64>,
     rng: ThreadRng,
 
-    queue: VecDeque<Customer>,
+    queue: VecDeque<ArrivingCustomer>,
     in_service: Vec<Customer>,
     time: f64,
-    next_customer: Customer,
-}
-
-pub enum QueueEvent {
-    Arrival(f64, Customer),
-    Departure(f64, Customer),
+    next_customer: ArrivingCustomer,
+    last_event: QueueEvent,
 }
 
 impl Queue {
     pub fn new_exp_exp(customer_arrival_rate: f64, customer_service_rate: f64) -> Queue {
         let customer_service_distribution = Exp::new(customer_service_rate).unwrap();
         let mut rng = rand::thread_rng();
-        let customer = Customer::first(&mut rng, &customer_service_distribution);
+        let customer = ArrivingCustomer::first(&mut rng, &customer_service_distribution);
 
         Queue {
             customer_arrival_lambda: customer_arrival_rate,
@@ -64,58 +57,60 @@ impl Queue {
             in_service: Vec::new(),
             time: 0.,
             next_customer: customer,
+            last_event: QueueEvent::new(),
         }
     }
 
-    pub fn next_event(&mut self) -> QueueEvent {
+    pub fn next_event(&mut self) -> &QueueEvent {
         let (index, departure_time) = self.next_departure();
 
         let next_arrival_time = self.next_customer.arrival_time();
 
-        return if departure_time < next_arrival_time {
+        if departure_time < next_arrival_time {
             // A customer in service departs before the next customer arrives.
             let served_customer = self.in_service.remove(index);
+            self.time = departure_time;
+            self.last_event = self.last_event.departure(self.time, &served_customer);
 
             // TODO: this is a function of queue discipline, this is first come first served.
             let next_to_be_served = self.queue.pop_front();
 
-            if let Some(customer) = next_to_be_served {
-                // TODO: update customer departure here, compute other quantities. The generator below assumes first-come-first-served.
+            if let Some(waiting_customer) = next_to_be_served {
+                let customer = Customer::start_service(waiting_customer, self.time);
                 self.in_service.push(customer);
             }
-            self.time = departure_time;
-
-            Departure(self.time, served_customer)
         } else {
             let arriving_customer = self.next_customer;
+            self.time = next_arrival_time;
+            self.last_event = self.last_event.arrival(self.time, &arriving_customer);
 
             // TODO: this is the 1 in M/M/1...
             if self.in_service.len() >= 1 {
                 self.queue.push_back(arriving_customer);
             } else {
-                self.in_service.push(arriving_customer);
+                let customer = Customer::start_service(arriving_customer, self.time);
+                self.in_service.push(customer);
             }
-            self.next_customer = Customer::next_1_fcfs(&mut self.rng, &self.customer_arrival_distribution, &self.customer_service_distribution, arriving_customer);
-            self.time = next_arrival_time;
-
-            Arrival(self.time, arriving_customer)
+            self.next_customer = ArrivingCustomer::next_1_fcfs(&mut self.rng, &self.customer_arrival_distribution, &self.customer_service_distribution, arriving_customer);
         };
+
+        &self.last_event
     }
 
     /// Returns the time of the next departure and the index of the customer in the in_service vector.
     ///
     /// When there are no customers in service, time is set to infinity and the index shouldn't be used.
     fn next_departure(&self) -> (usize, f64) {
-        let mut departure_time = f64::INFINITY;
+        let mut next_departure_time = f64::INFINITY;
         let mut index = 0;
         for (i, customer) in self.in_service.iter().enumerate() {
-            if customer.departure_time() < departure_time {
-                departure_time = customer.departure_time();
+            if customer.time_of_departure < next_departure_time {
+                next_departure_time = customer.time_of_departure;
             }
             index = i;
         }
 
-        return (index, departure_time);
+        return (index, next_departure_time);
     }
 }
 
@@ -129,17 +124,33 @@ pub enum QueueError {
     LineParsing(String),
 }
 
-const COLUMNS: [&str; 4] = [
+const COLUMNS: [&str; 12] = [
     "time(s)",
     "arrivals",
     "departures",
-    "in_system"
+    "in_system",
+    "type",
+    "interarrival_time",
+    "time_of_arrival",
+    "service_time",
+    "time_of_service_start",
+    "time_of_departure",
+    "wait_in_queue",
+    "wait_in_system",
 ];
 
 const I_TIME: usize = 0;
 const I_ARRIVALS: usize = 1;
 const I_DEPARTURES: usize = 2;
 const I_IN_SYSTEM: usize = 3;
+const I_TYPE: usize = 4;
+const I_INTERARRIVAL_TIME: usize = 5;
+const I_TIME_OF_ARRIVAL: usize = 6;
+const I_SERVICE_TIME: usize = 7;
+const I_TIME_OF_SERVICE_START: usize = 8;
+const I_TIME_OF_DEPARTURE: usize = 9;
+const I_WAIT_IN_QUEUE: usize = 10;
+const I_WAIT_IN_SYSTEM: usize = 11;
 
 #[derive(Deserialize, Serialize)]
 pub struct Parameters {
@@ -175,7 +186,13 @@ impl CountAnalyser {
 
         let params: Parameters = serde_json::from_str(&line_0[1..]).map_err(|e| QueueError::ParameterReading(e))?;
 
-        let expected = format!("# {} {} {} {}\n", COLUMNS[I_TIME], COLUMNS[I_ARRIVALS], COLUMNS[I_DEPARTURES], COLUMNS[I_IN_SYSTEM]);
+        let expected = format!("# {} {} {} {} {} {} {} {} {} {} {} {}\n",
+                               COLUMNS[I_TIME], COLUMNS[I_ARRIVALS], COLUMNS[I_DEPARTURES], COLUMNS[I_IN_SYSTEM],
+                               COLUMNS[I_TYPE],
+                               COLUMNS[I_INTERARRIVAL_TIME], COLUMNS[I_TIME_OF_ARRIVAL], COLUMNS[I_SERVICE_TIME],
+                               COLUMNS[I_TIME_OF_SERVICE_START], COLUMNS[I_TIME_OF_DEPARTURE],
+                               COLUMNS[I_WAIT_IN_QUEUE], COLUMNS[I_WAIT_IN_SYSTEM],
+        );
         assert_eq!(expected, line_1);
 
         let mut analyser = CountAnalyser::default();
@@ -185,7 +202,7 @@ impl CountAnalyser {
         Ok(analyser)
     }
 
-    pub fn add_count(&mut self, count: Count) {
+    pub fn add_count(&mut self, count: QueueEvent) {
         if !self.time_in_n.contains_key(&self.last_n) {
             self.time_in_n.insert(self.last_n, 0.);
         }
@@ -229,29 +246,46 @@ impl CountAnalyser {
             sample_lambda,
             mu: self.mu,
             sample_mu,
-            proportions
+            proportions,
         }
     }
 }
 
-pub struct Count {
+#[derive(Copy, Clone)]
+pub struct QueueEvent {
     time: f64,
     arrivals: u64,
     departures: u64,
     in_system: u64,
+    served_customer: Option<Customer>,
 }
 
-impl TryFrom<String> for Count {
+impl TryFrom<String> for QueueEvent {
     type Error = QueueError;
 
     fn try_from(line: String) -> Result<Self, Self::Error> {
         let mut tokens: Vec<&str> = line.split_ascii_whitespace().into_iter().collect();
 
-        Ok(Count {
+        let served_customer = if tokens[I_TYPE] == "A" {
+            None
+        } else {
+            Some(Customer {
+                interarrival_time: parse(&tokens, I_INTERARRIVAL_TIME)?,
+                time_of_arrival: parse(&tokens, I_TIME_OF_ARRIVAL)?,
+                service_time: parse(&tokens, I_SERVICE_TIME)?,
+                time_of_service_start: parse(&tokens, I_TIME_OF_SERVICE_START)?,
+                time_of_departure: parse(&tokens, I_TIME_OF_DEPARTURE)?,
+                wait_in_queue: parse(&tokens, I_WAIT_IN_QUEUE)?,
+                wait_in_system: parse(&tokens, I_WAIT_IN_SYSTEM)?,
+            })
+        };
+
+        Ok(QueueEvent {
             time: parse(&tokens, I_TIME)?,
             arrivals: parse(&tokens, I_ARRIVALS)?,
             departures: parse(&tokens, I_DEPARTURES)?,
             in_system: parse(&tokens, I_IN_SYSTEM)?,
+            served_customer,
         })
     }
 }
@@ -270,6 +304,62 @@ fn parse<T: std::str::FromStr>(tokens: &Vec<&str>, index: usize) -> Result<T, Qu
 
     let msg = format!("Couldn't parse {} as {}", maybe_token.unwrap(), COLUMNS[index]);
     return Err(QueueError::LineParsing(msg));
+}
+
+impl QueueEvent {
+    pub fn dump_line_header<OUT: Write>(out: &mut OUT) -> Result<(), std::io::Error> {
+        writeln!(out, "# time(s) arrivals departures in_system type \
+        interarrival_time time_of_arrival service_time \
+        time_of_service_start time_of_departure \
+        wait_in_queue wait_in_system")?;
+
+        Ok(())
+    }
+
+    pub fn dump_line<OUT: Write>(&self, out: &mut OUT) -> Result<(), std::io::Error> {
+        if self.served_customer.is_none() {
+            writeln!(out, "{} {} {} {} A - - - - - - -", self.time, self.arrivals, self.departures, self.arrivals - self.departures)?;
+        } else {
+            let customer = self.served_customer.as_ref().unwrap();
+            writeln!(out, "{} {} {} {} D {} {} {} {} {} {} {}", self.time, self.arrivals, self.departures, self.arrivals - self.departures,
+                     customer.interarrival_time, customer.time_of_arrival, customer.service_time,
+                     customer.time_of_service_start, customer.time_of_departure,
+                     customer.wait_in_queue, customer.wait_in_system,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn new() -> QueueEvent {
+        QueueEvent {
+            time: 0.0,
+            arrivals: 0,
+            departures: 0,
+            in_system: 0,
+            served_customer: None,
+        }
+    }
+
+    fn arrival(self, time: f64, _arrival: &ArrivingCustomer) -> QueueEvent {
+        QueueEvent {
+            time,
+            arrivals: self.arrivals + 1,
+            departures: self.departures,
+            in_system: self.in_system + 1,
+            served_customer: None,
+        }
+    }
+
+    fn departure(self, time: f64, served_customer: &Customer) -> QueueEvent {
+        QueueEvent {
+            time,
+            arrivals: self.arrivals,
+            departures: self.departures + 1,
+            in_system: self.in_system - 1,
+            served_customer: Some((*served_customer)),
+        }
+    }
 }
 
 pub struct CountAnalysis {
