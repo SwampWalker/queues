@@ -1,6 +1,5 @@
 use rand::Rng;
 use rand_distr::Distribution;
-use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ArrivingCustomer {

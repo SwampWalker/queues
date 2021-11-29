@@ -1,9 +1,7 @@
 use structopt::StructOpt;
 use std::fs::File;
-use std::io::{BufReader, BufRead, Error};
-use serde_json::Value;
+use std::io::{BufReader, BufRead};
 use std::convert::TryFrom;
-use std::str::SplitAsciiWhitespace;
 use queues::queues::{QueueEvent, EventAnalyser, QueueError};
 use thiserror::Error;
 

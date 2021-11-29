@@ -12,7 +12,7 @@ const HOUR: f64 = 60. * MINUTE;
 #[derive(StructOpt)]
 struct Cli {
     /// The number of samples to generate.
-    #[structopt(short, long, default_value = "10000000")]
+    #[structopt(short = "n", long, default_value = "10000000")]
     samples: usize,
     /// The path to the file to output to.
     #[structopt(short, long, parse(from_os_str))]
@@ -23,6 +23,10 @@ struct Cli {
     /// The average time it takes to provide service to a customer: mu
     #[structopt(short =  "mu", long, default_value = "10.")]
     customer_service_time_in_minutes: f64,
+    /// The number of servers.
+    #[structopt(short, long, default_value = "1")]
+    servers: u8,
+    /// Empties the queue after the number of samples is finished. Therefore, all arrivals are served.
     #[structopt(short, long)]
     empty: bool,
 }
@@ -44,7 +48,7 @@ fn main() -> Result<(), Error> {
 
     let cli: Cli = Cli::from_args();
 
-    let queue = Queue::new_exp_exp(cli.lambda(), cli.mu());
+    let queue = Queue::new_exp_exp(cli.lambda(), cli.mu(), cli.servers);
 
     if let Some(path) = &cli.path {
         let mut file = File::create(path).unwrap();

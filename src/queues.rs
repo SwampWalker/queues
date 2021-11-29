@@ -6,10 +6,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use rand::prelude::ThreadRng;
 use rand_distr::Exp;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 
 use crate::customer::{ArrivingCustomer, Customer};
+use crate::theory;
+use crate::theory::QueueTheory;
 
 // TODO: if I continue down this road, that Exp type will need to be parameterized, probably ThreadRng as well.
 /// So, here's the plan:
@@ -27,6 +28,7 @@ pub struct Queue {
     customer_arrival_lambda: f64,
     /// This one is referred to as mu in the birth/death markov model but goes in as lambda in the exponential distribution.
     customer_service_lambda: f64,
+    servers: u8,
 
     customer_arrival_distribution: Exp<f64>,
     customer_service_distribution: Exp<f64>,
@@ -40,7 +42,7 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub fn new_exp_exp(customer_arrival_rate: f64, customer_service_rate: f64) -> Queue {
+    pub fn new_exp_exp(customer_arrival_rate: f64, customer_service_rate: f64, servers: u8) -> Queue {
         let customer_service_distribution = Exp::new(customer_service_rate).unwrap();
         let mut rng = rand::thread_rng();
         let customer = ArrivingCustomer::first(&mut rng, &customer_service_distribution);
@@ -48,6 +50,7 @@ impl Queue {
         Queue {
             customer_arrival_lambda: customer_arrival_rate,
             customer_service_lambda: customer_service_rate,
+            servers,
 
             customer_arrival_distribution: Exp::new(customer_arrival_rate).unwrap(),
             customer_service_distribution,
@@ -84,8 +87,7 @@ impl Queue {
             self.time = next_arrival_time;
             self.last_event = self.last_event.arrival(self.time, &arriving_customer);
 
-            // TODO: this is the 1 in M/M/1...
-            if self.in_service.len() >= 1 {
+            if self.in_service.len() >= self.servers as usize {
                 self.queue.push_back(arriving_customer);
             } else {
                 let customer = Customer::start_service(arriving_customer, self.time);
@@ -167,12 +169,14 @@ const I_WAIT_IN_SYSTEM: usize = 11;
 pub struct Parameters {
     lambda: f64,
     mu: f64,
+    servers: Option<u8>,
 }
 
 #[derive(Default)]
 pub struct EventAnalyser {
     lambda: f64,
     mu: f64,
+    servers: i32,
 
     last_service_start: f64,
     n_served: u64,
@@ -211,6 +215,8 @@ impl EventAnalyser {
         let mut analyser = EventAnalyser::default();
         analyser.lambda = params.lambda;
         analyser.mu = params.mu;
+        // TODO: get this from params
+        analyser.servers = params.servers.unwrap_or(1) as i32;
 
         Ok(analyser)
     }
@@ -258,11 +264,12 @@ impl EventAnalyser {
         for (n, time_in_n) in &self.time_in_n {
             proportions.insert(*n, time_in_n / self.time_of_last_event);
         }
+        
+        let theory = theory::MMC::new(self.lambda, self.mu, self.servers as u8);
 
         CountAnalysis {
-            lambda: self.lambda,
+            theory,
             sample_lambda,
-            mu: self.mu,
             sample_mu,
             sample_w_q: self.queue_wait_sum / self.n_served as f64,
             sample_w: self.system_wait_sum / self.n_served as f64,
@@ -284,7 +291,7 @@ impl TryFrom<String> for QueueEvent {
     type Error = QueueError;
 
     fn try_from(line: String) -> Result<Self, Self::Error> {
-        let mut tokens: Vec<&str> = line.split_ascii_whitespace().into_iter().collect();
+        let tokens: Vec<&str> = line.split_ascii_whitespace().into_iter().collect();
 
         let served_customer = if tokens[I_TYPE] == "A" {
             None
@@ -377,15 +384,14 @@ impl QueueEvent {
             arrivals: self.arrivals,
             departures: self.departures + 1,
             in_system: self.in_system - 1,
-            served_customer: Some((*served_customer)),
+            served_customer: Some(*served_customer),
         }
     }
 }
 
 pub struct CountAnalysis {
-    lambda: f64,
+    theory: theory::MMC,
     sample_lambda: f64,
-    mu: f64,
     sample_mu: f64,
     sample_w_q: f64,
     sample_w: f64,
@@ -395,43 +401,36 @@ pub struct CountAnalysis {
 impl CountAnalysis {
     /// The expected values are only valid for M/M/1...
     pub fn dump_proportions(&self) {
-        let rho = self.lambda / self.mu;
         println!("n measured_p_n p_n");
         for n in 0u64..self.proportions.len() as u64 {
-            let expected_p_n = (1. - rho) * rho.powi(n as i32);
-            println!("{} {} {}", n, self.proportions.get(&n).unwrap(), expected_p_n);
+            println!("{} {} {}", n, self.proportions.get(&n).unwrap(), self.theory.p(n as u32));
         }
     }
 
     pub fn dump_cross_sectional_statistics(&self) {
-        println!("lambda: sample = {}, input = {}", self.sample_lambda, self.lambda);
-        println!("mu: sample = {}, input = {}", self.sample_mu, self.mu);
+        println!("lambda: sample = {}, input = {}", self.sample_lambda, self.theory.lambda);
+        println!("mu: sample = {}, input = {}", self.sample_mu, self.theory.mu);
 
         // Steady state count of people in queue/system
         let mut steady_customers_count = 0.;
         for n in 0u64..self.proportions.len() as u64 {
             steady_customers_count += n as f64 * self.proportions.get(&n).unwrap();
         }
-        let ell = self.lambda / (self.mu - self.lambda);
-        println!("Average number in system, L: sample = {}, expected = {}", steady_customers_count, ell);
+        println!("Average number in system, L: sample = {}, expected = {}", steady_customers_count, self.theory.l());
 
         let mut steady_queue_count = 0.;
         for n in 1u64..self.proportions.len() as u64 {
             steady_queue_count += (n - 1) as f64 * self.proportions.get(&n).unwrap();
         }
-        let ell_q = self.lambda * self.lambda / (self.mu * (self.mu - self.lambda));
-        println!("Average number in queue, L_q: sample = {}, expected = {}", steady_queue_count, ell_q);
+        println!("Average number in queue, L_q: sample = {}, expected = {}", steady_queue_count, self.theory.l_q());
 
         // Average waits.
-        let rho = self.lambda / self.mu;
-        let expected_w_q = rho / (self.mu - self.lambda);
-        println!("Average wait in Queue, W_q: sample = {}, expected = {}", self.sample_w_q, expected_w_q);
-        let expected_w = 1. / (self.mu - self.lambda);
-        println!("Average wait in system, W: sample = {}, expected = {}", self.sample_w, expected_w);
+        println!("Average wait in Queue, W_q: sample = {}, expected = {}", self.sample_w_q, self.theory.wait_in_queue());
+        println!("Average wait in system, W: sample = {}, expected = {}", self.sample_w, self.theory.wait_in_system());
 
         println!();
         println!("Little's Law:");
-        println!("L = W * lambda = {}, expected = {}", self.sample_w * self.sample_lambda, ell);
-        println!("L_q = W_q * lambda = {}, expected = {}", self.sample_w_q * self.sample_lambda, ell_q);
+        println!("L = W * lambda = {}, expected = {}", self.sample_w * self.sample_lambda, self.theory.l());
+        println!("L_q = W_q * lambda = {}, expected = {}", self.sample_w_q * self.sample_lambda, self.theory.l_q());
     }
 }
