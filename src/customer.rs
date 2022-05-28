@@ -99,4 +99,12 @@ impl Customer {
             wait_in_system: time_of_service_start - arriving_customer.time_of_arrival + arriving_customer.service_time,
         }
     }
+
+    pub fn time_of_departure(&self) -> f64 {
+        self.time_of_departure
+    }
+
+    pub fn wait_in_system(&self) -> f64 {
+        self.wait_in_system
+    }
 }

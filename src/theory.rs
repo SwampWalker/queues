@@ -1,5 +1,3 @@
-use rand_distr::num_traits::Pow;
-
 pub trait QueueTheory {
     /// The number of customers in the system at steady state. Also known as L.
     fn number_in_system(&self) -> f64;

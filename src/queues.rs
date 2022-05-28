@@ -387,6 +387,10 @@ impl QueueEvent {
             served_customer: Some(*served_customer),
         }
     }
+
+    pub fn served_customer(&self) -> &Option<Customer> {
+        &self.served_customer
+    }
 }
 
 pub struct CountAnalysis {

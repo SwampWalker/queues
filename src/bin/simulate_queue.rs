@@ -20,8 +20,8 @@ struct Cli {
     /// The interarrival rate of customers: lambda
     #[structopt(short, long, default_value = "5.8")]
     customers_per_hour: f64,
-    /// The average time it takes to provide service to a customer: mu
-    #[structopt(short =  "mu", long, default_value = "10.")]
+    /// The average time it takes to provide service to a customer: 1. / mu
+    #[structopt(short =  "imu", long, default_value = "10.")]
     customer_service_time_in_minutes: f64,
     /// The number of servers.
     #[structopt(short, long, default_value = "1")]
@@ -65,17 +65,17 @@ fn main() -> Result<(), Error> {
 fn simulate<OUT: Write>(out: &mut OUT, terminate: Arc<AtomicBool>, cli: Cli, mut queue: Queue) -> Result<(), Error>{
     let mut samples = 0;
     writeln!(out, "# {{\"lambda\":{}, \"mu\":{}}}", cli.lambda(), cli.mu())?;
-    QueueEvent::dump_line_header(out);
+    QueueEvent::dump_line_header(out).unwrap();
     while !terminate.load(Ordering::Relaxed) && samples < cli.samples {
         samples += 1;
 
         let event = queue.next_event();
-        event.dump_line(out);
+        event.dump_line(out).unwrap();
     }
     if cli.empty {
         let emptied = queue.empty();
         for event in emptied {
-            event.dump_line(out);
+            event.dump_line(out).unwrap();
         }
     }
 
